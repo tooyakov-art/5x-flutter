@@ -16,22 +16,39 @@ class X5BridgeApp extends StatefulWidget {
   State<X5BridgeApp> createState() => _X5BridgeAppState();
 }
 
-class _X5BridgeAppState extends State<X5BridgeApp> {
+class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStateMixin {
   final InAppPurchase _inAppPurchase = InAppPurchase.instance;
   late StreamSubscription<List<PurchaseDetails>> _subscription;
   InAppWebViewController? _webViewController;
+  bool _isLoading = true;
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
 
   @override
   void initState() {
     super.initState();
-    // 💸 СЛУШАЕМ СТАТУС ОПЛАТЫ ОТ APPLE/GOOGLE
+    // 🖥️ FULLSCREEN MODE (Immersive)
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      systemNavigationBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ));
+
+    // 🌀 ANIMATION SETUP
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+    _fadeAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(_animationController);
+
+    // 💸 IAP LISTENER
     final Stream<List<PurchaseDetails>> purchaseUpdated = _inAppPurchase.purchaseStream;
     _subscription = purchaseUpdated.listen((purchaseDetailsList) {
       _listenToPurchaseUpdated(purchaseDetailsList);
     }, onDone: () {
       _subscription.cancel();
     }, onError: (error) {
-      // Обработка ошибок стрима
       print("💰 IAP STREAM ERROR: $error");
     });
   }
@@ -39,39 +56,33 @@ class _X5BridgeAppState extends State<X5BridgeApp> {
   @override
   void dispose() {
     _subscription.cancel();
+    _animationController.dispose();
     super.dispose();
   }
 
+  // ... (Keep existing IAP methods: _listenToPurchaseUpdated, _buyProduct) ...
   // 👂 ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ ПОКУПКИ
   void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) {
     for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.pending) {
-        // Показываем юзеру, что процесс идет
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text("⏳ Оплата обрабатывается...")),
         );
       } else {
         if (purchaseDetails.status == PurchaseStatus.error) {
-          // Ошибка оплаты
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("❌ Ошибка оплаты: ${purchaseDetails.error?.message}")),
           );
         } else if (purchaseDetails.status == PurchaseStatus.purchased ||
             purchaseDetails.status == PurchaseStatus.restored) {
-          
-          // ✅ УСПЕХ!
-          final bool valid = true; // Тут можно добавить проверку чека на сервере
+          final bool valid = true; 
           if (valid) {
-            // Сообщаем React сайту, что оплата прошла!
-            // bridgeSuccess - это функция, которую React должен слушать (или мы просто кидаем event)
             _webViewController?.evaluateJavascript(source: "window.postMessage({target: 'PAYMENT_SUCCESS', product: '${purchaseDetails.productID}'}, '*')");
-            
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text("✅ Оплата прошла успешно!"), backgroundColor: Colors.green),
             );
           }
         }
-
         if (purchaseDetails.pendingCompletePurchase) {
           _inAppPurchase.completePurchase(purchaseDetails);
         }
@@ -89,13 +100,11 @@ class _X5BridgeAppState extends State<X5BridgeApp> {
       return;
     }
 
-    // Запрашиваем продукт у магазина
-    const Set<String> _kIds = <String>{'premium_monthly', 'premium_yearly'}; // Дефолтные ID, если React пришлет фигню
+    const Set<String> _kIds = <String>{'premium_monthly', 'premium_yearly'};
     final Set<String> ids = {productId}; 
     final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(ids);
 
     if (response.notFoundIDs.isNotEmpty) {
-       // Если айдишник не найден в Apple Connect / Google Console
        print("❌ Product not found: ${response.notFoundIDs}");
        ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text("❌ Продукт не найден: $productId")),
@@ -105,8 +114,6 @@ class _X5BridgeAppState extends State<X5BridgeApp> {
 
     final ProductDetails productDetails = response.productDetails.first;
     final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
-    
-    // Запускаем нативный диалог оплаты
     _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
   }
 
@@ -114,41 +121,85 @@ class _X5BridgeAppState extends State<X5BridgeApp> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        child: InAppWebView(
-          initialSettings: InAppWebViewSettings(
-            applicationNameForUserAgent: "X5_APP_CLIENT",
-            javaScriptEnabled: true,
+      resizeToAvoidBottomInset: false, // Prevent resize when keyboard opens
+      body: Stack(
+        children: [
+          // 🌐 LAYER 1: WEBVIEW
+          InAppWebView(
+            initialSettings: InAppWebViewSettings(
+              applicationNameForUserAgent: "X5_APP_CLIENT",
+              javaScriptEnabled: true,
+              transparentBackground: true,
+              useHybridComposition: true, // For better Android performance
+              allowsInlineMediaPlayback: true,
+            ),
+            initialUrlRequest: URLRequest(
+              url: WebUri("https://x5marketing.com"), 
+            ),
+            onWebViewCreated: (controller) {
+              _webViewController = controller;
+              controller.addJavaScriptHandler(
+                handlerName: 'payBridge',
+                callback: (args) {
+                  if (args.isNotEmpty) _buyProduct(args[0].toString());
+                },
+              );
+              controller.addJavaScriptHandler(
+                handlerName: 'pushBridge',
+                callback: (args) {},
+              );
+            },
+            onLoadStop: (controller, url) async {
+              // Wait a bit to ensure smooth transition
+              await Future.delayed(const Duration(seconds: 1));
+              if (mounted) {
+                setState(() {
+                  _isLoading = false;
+                });
+              }
+            },
+            onProgressChanged: (controller, progress) {
+               // Optional: Update granular progress if needed
+            },
           ),
-          initialUrlRequest: URLRequest(
-            url: WebUri("https://x5marketing.com"), 
-          ),
-          onWebViewCreated: (controller) {
-            _webViewController = controller;
 
-            // 💎 PAY BRIDGE: React вызывает payBridge('product_id')
-            controller.addJavaScriptHandler(
-              handlerName: 'payBridge',
-              callback: (args) {
-                print("💎 PAY SIGNAL: $args");
-                if (args.isNotEmpty) {
-                  String productId = args[0].toString();
-                  // Запускаем процесс оплаты
-                  _buyProduct(productId);
-                }
-              },
-            );
-
-            // 🔔 PUSH BRIDGE
-            controller.addJavaScriptHandler(
-              handlerName: 'pushBridge',
-              callback: (args) {
-                print("🔔 PUSH SIGNAL: $args");
-                // TODO: Сохранить токен или логику пушей
-              },
-            );
-          },
-        ),
+          // 🌀 LAYER 2: LOADING OVERLAY
+          if (_isLoading)
+            Container(
+              color: Colors.black,
+              width: double.infinity,
+              height: double.infinity,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    FadeTransition(
+                      opacity: _fadeAnimation,
+                      child: const Text(
+                        "X5",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 60,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 2.0,
+                          fontFamily: 'Arial', // Fallback, system font usually looks good
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    const SizedBox(
+                      width: 200,
+                      child: LinearProgressIndicator(
+                        backgroundColor: Colors.white10,
+                        color: Colors.white,
+                        minHeight: 2,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
