@@ -170,6 +170,10 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
               transparentBackground: true,
               useHybridComposition: true, // For better Android performance
               allowsInlineMediaPlayback: true,
+              // 🚫 DISABLE CACHE - Always load fresh content
+              cacheEnabled: false,
+              clearCache: true,
+              cacheMode: CacheMode.LOAD_NO_CACHE,
             ),
             initialUrlRequest: URLRequest(
               url: WebUri("https://x5marketing.com"), 
