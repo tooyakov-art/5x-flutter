@@ -63,7 +63,7 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
 
   // ... (Keep existing IAP methods: _listenToPurchaseUpdated, _buyProduct) ...
   // 👂 ОСНОВНАЯ ЛОГИКА ОБРАБОТКИ ПОКУПКИ
-  void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) {
+  void _listenToPurchaseUpdated(List<PurchaseDetails> purchaseDetailsList) async {
     for (final PurchaseDetails purchaseDetails in purchaseDetailsList) {
       if (purchaseDetails.status == PurchaseStatus.pending) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -74,18 +74,26 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text("❌ Ошибка оплаты: ${purchaseDetails.error?.message}")),
           );
+           // 3. Обработка Ошибок (вызов JS)
+          _webViewController?.evaluateJavascript(
+              source: "window.onAppPaymentFailed('${purchaseDetails.error?.message ?? "Unknown error"}');"
+          );
         } else if (purchaseDetails.status == PurchaseStatus.purchased ||
             purchaseDetails.status == PurchaseStatus.restored) {
-          final bool valid = true; 
-          if (valid) {
-            _webViewController?.evaluateJavascript(source: "window.postMessage({target: 'PAYMENT_SUCCESS', product: '${purchaseDetails.productID}'}, '*')");
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text("✅ Оплата прошла успешно!"), backgroundColor: Colors.green),
-            );
+          
+          // 1. Завершаем транзакцию (ОБЯЗАТЕЛЬНО для Apple)
+          if (purchaseDetails.pendingCompletePurchase) {
+             await _inAppPurchase.completePurchase(purchaseDetails);
           }
-        }
-        if (purchaseDetails.pendingCompletePurchase) {
-          _inAppPurchase.completePurchase(purchaseDetails);
+          
+          // 2. Уведомляем Веб Сайт (вызов JS)
+          _webViewController?.evaluateJavascript(
+              source: "window.onAppPaymentSuccess('${purchaseDetails.productID}');"
+          );
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("✅ Оплата прошла успешно!"), backgroundColor: Colors.green),
+          );
         }
       }
     }
@@ -101,7 +109,7 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
       return;
     }
 
-    const Set<String> _kIds = <String>{'premium_monthly', 'premium_yearly'};
+    const Set<String> _kIds = <String>{'x5_pro_monthly', 'premium_yearly'};
     final Set<String> ids = {productId}; 
     final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(ids);
 
@@ -116,6 +124,22 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
     final ProductDetails productDetails = response.productDetails.first;
     final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
     _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
+  }
+
+  // ♻️ ВОССТАНОВЛЕНИЕ ПОКУПОК
+  Future<void> _restorePurchases() async {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("⏳ Восстановление покупок...")),
+    );
+    try {
+      await _inAppPurchase.restorePurchases();
+      // Note: restoration results come through the same _subscription stream
+      // We rely on the stream listener to handle the 'restored' status.
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text("❌ Ошибка восстановления: $e")),
+      );
+    }
   }
 
   @override
@@ -143,6 +167,12 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
                 handlerName: 'payBridge',
                 callback: (args) {
                   if (args.isNotEmpty) _buyProduct(args[0].toString());
+                },
+              );
+              controller.addJavaScriptHandler(
+                handlerName: 'restoreBridge',
+                callback: (args) {
+                   _restorePurchases();
                 },
               );
               controller.addJavaScriptHandler(
