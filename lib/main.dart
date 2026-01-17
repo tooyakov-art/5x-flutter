@@ -109,7 +109,10 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
       return;
     }
 
-    const Set<String> _kIds = <String>{'x5_pro_monthly', 'premium_yearly'};
+    // Defining supported product IDs for reference/validation
+    const Set<String> _kIds = <String>{'x5_pro_monthly', 'x5_pro_yearly', 'x5_credits_1000'};
+    
+    // Explicitly add the requested product to the query set
     final Set<String> ids = {productId}; 
     final ProductDetailsResponse response = await _inAppPurchase.queryProductDetails(ids);
 
@@ -123,7 +126,17 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
 
     final ProductDetails productDetails = response.productDetails.first;
     final PurchaseParam purchaseParam = PurchaseParam(productDetails: productDetails);
-    _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
+
+    // Differentiate between Consumable (Credits) and Non-Consumable/Subscription (Pro Plans)
+    if (productId == 'x5_credits_1000') {
+      // Consumable: Can be purchased multiple times (e.g., Credits)
+      // autoConsume: true is default for buyConsumable on Android, but handled manually via completePurchase on iOS usually.
+      // flutter_inapp_purchase documentation suggests using buyConsumable for consumables.
+      _inAppPurchase.buyConsumable(purchaseParam: purchaseParam);
+    } else {
+      // Non-Consumable or Subscription: One-time unlock or auto-renewing (e.g., Pro Plan)
+      _inAppPurchase.buyNonConsumable(purchaseParam: purchaseParam);
+    }
   }
 
   // ♻️ ВОССТАНОВЛЕНИЕ ПОКУПОК
