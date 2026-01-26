@@ -261,6 +261,11 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
         nonce: nonce,
       );
 
+      // Check if identity token exists
+      if (appleCredential.identityToken == null) {
+        throw Exception('Apple Sign In returned no identity token');
+      }
+
       final oauthCredential = OAuthProvider("apple.com").credential(
         idToken: appleCredential.identityToken,
         rawNonce: rawNonce,
@@ -270,10 +275,10 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
 
       // Send success back to React
       final user = userCredential.user;
-      final displayName = appleCredential.givenName != null 
+      final displayName = appleCredential.givenName != null
           ? '${appleCredential.givenName} ${appleCredential.familyName ?? ""}'.trim()
           : user?.displayName ?? 'Apple User';
-      
+
       _webViewController?.evaluateJavascript(source: '''
         window.onAppAuthSuccess && window.onAppAuthSuccess({
           uid: "${user?.uid ?? ''}",
@@ -281,6 +286,15 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
           displayName: "$displayName",
           photoURL: "${user?.photoURL ?? ''}"
         });
+      ''');
+    } on SignInWithAppleAuthorizationException catch (e) {
+      // Handle specific Apple Sign In errors (user cancelled, etc.)
+      print("❌ Apple Sign In Authorization Error: ${e.code} - ${e.message}");
+      final errorMsg = e.code == AuthorizationErrorCode.canceled
+          ? 'User cancelled'
+          : e.message;
+      _webViewController?.evaluateJavascript(source: '''
+        window.onAppAuthFailed && window.onAppAuthFailed("$errorMsg");
       ''');
     } catch (e) {
       print("❌ Apple Sign In Error: $e");
@@ -353,7 +367,7 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
           // 🌐 LAYER 1: WEBVIEW
           InAppWebView(
             initialSettings: InAppWebViewSettings(
-              applicationNameForUserAgent: "X5_APP_CLIENT",
+              applicationNameForUserAgent: Platform.isIOS ? "X5_IOS_CLIENT" : "X5_ANDROID_CLIENT",
               javaScriptEnabled: true,
               transparentBackground: true,
               useHybridComposition: true, // For better Android performance
@@ -388,15 +402,25 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
               // 🔐 AUTH BRIDGE
               controller.addJavaScriptHandler(
                 handlerName: 'authBridge',
-                callback: (args) async {
+                callback: (args) {
                   if (args.isEmpty) return;
                   final provider = args[0].toString();
-                  
-                  if (provider == 'apple') {
-                    await _signInWithApple();
-                  } else if (provider == 'google') {
-                    await _signInWithGoogle();
-                  }
+
+                  // Run auth in separate async context to avoid blocking WebView
+                  Future.microtask(() async {
+                    try {
+                      if (provider == 'apple') {
+                        await _signInWithApple();
+                      } else if (provider == 'google') {
+                        await _signInWithGoogle();
+                      }
+                    } catch (e) {
+                      print("❌ Auth bridge error: $e");
+                      _webViewController?.evaluateJavascript(source: '''
+                        window.onAppAuthFailed && window.onAppAuthFailed("$e");
+                      ''');
+                    }
+                  });
                 },
               );
               
