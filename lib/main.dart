@@ -11,7 +11,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
-import 'package:flutter_windowmanager_plus/flutter_windowmanager_plus.dart';
+// NOTE: flutter_windowmanager_plus removed - was causing iOS crash
+// Screen protection disabled for now, will re-add with platform channels later
 
 void main() async {
   // Wrap everything in error handling
@@ -58,31 +59,17 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
   late Animation<double> _fadeAnimation;
   bool _screenProtectionEnabled = false;
 
-  // 🛡️ SCREEN PROTECTION (только Android)
+  // 🛡️ SCREEN PROTECTION - DISABLED
+  // flutter_windowmanager_plus was causing iOS crash
+  // TODO: Re-implement with platform channels
   Future<void> _enableScreenProtection() async {
-    if (!Platform.isAndroid || _screenProtectionEnabled) return;
-
-    try {
-      await FlutterWindowManagerPlus.addFlags(FlutterWindowManagerPlus.FLAG_SECURE);
-      _screenProtectionEnabled = true;
-      print("🛡️ Screen protection enabled");
-    } catch (e, stackTrace) {
-      print("⚠️ Screen protection enable error: $e");
-      print("Stack trace: $stackTrace");
-    }
+    if (!Platform.isAndroid) return;
+    print("🛡️ Screen protection disabled (package removed)");
   }
 
   Future<void> _disableScreenProtection() async {
-    if (!Platform.isAndroid || !_screenProtectionEnabled) return;
-
-    try {
-      await FlutterWindowManagerPlus.clearFlags(FlutterWindowManagerPlus.FLAG_SECURE);
-      _screenProtectionEnabled = false;
-      print("🛡️ Screen protection disabled");
-    } catch (e, stackTrace) {
-      print("⚠️ Screen protection disable error: $e");
-      print("Stack trace: $stackTrace");
-    }
+    if (!Platform.isAndroid) return;
+    print("🛡️ Screen protection disabled (package removed)");
   }
 
   @override
