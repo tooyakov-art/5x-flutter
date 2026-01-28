@@ -44,14 +44,22 @@ class X5BridgeApp extends StatefulWidget {
   State<X5BridgeApp> createState() => _X5BridgeAppState();
 }
 
-class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStateMixin {
+class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin {
   InAppPurchase? _inAppPurchase;
   StreamSubscription<List<PurchaseDetails>>? _subscription;
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
   String? _loadError;
-  late AnimationController _animationController;
-  late Animation<double> _fadeAnimation;
+
+  // 🎨 SPLASH ANIMATIONS
+  late AnimationController _pulseController;
+  late AnimationController _scaleController;
+  late AnimationController _rotateController;
+  late Animation<double> _pulseAnimation;
+  late Animation<double> _scaleAnimation;
+  late Animation<double> _rotateAnimation;
+  late Animation<double> _glowAnimation;
+
   bool _screenProtectionEnabled = false;
 
   // 🛡️ SCREEN PROTECTION - DISABLED
@@ -71,12 +79,34 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
   void initState() {
     super.initState();
 
-    // 🌀 ANIMATION SETUP (safe to do in initState)
-    _animationController = AnimationController(
+    // 🎨 PREMIUM SPLASH ANIMATIONS
+    // Pulse animation (for glow effect)
+    _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
-    _fadeAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(_animationController);
+    _pulseAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+    _glowAnimation = Tween<double>(begin: 40.0, end: 80.0).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    // Scale animation (for logo bounce)
+    _scaleController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.05).animate(
+      CurvedAnimation(parent: _scaleController, curve: Curves.easeInOut),
+    );
+
+    // Rotate animation (for ring)
+    _rotateController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 4000),
+    )..repeat();
+    _rotateAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(_rotateController);
 
     // 🚀 Defer platform-specific initialization to after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -143,7 +173,9 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
   @override
   void dispose() {
     _subscription?.cancel();
-    _animationController.dispose();
+    _pulseController.dispose();
+    _scaleController.dispose();
+    _rotateController.dispose();
     super.dispose();
   }
 
@@ -469,6 +501,14 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
             },
             onLoadStop: (controller, url) async {
               print("✅ Page loaded: $url");
+
+              // 📱 INJECT PLATFORM INFO for web app detection
+              final platformName = Platform.isIOS ? 'ios' : 'android';
+              await controller.evaluateJavascript(source: '''
+                window.x5NativePlatform = "$platformName";
+                console.log("🔧 Platform injected: $platformName");
+              ''');
+
               // Wait a bit to ensure smooth transition
               await Future.delayed(const Duration(seconds: 1));
               if (mounted) {
@@ -492,40 +532,152 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
             },
           ),
 
-          // 🌀 LAYER 2: LOADING OVERLAY
+          // 🌀 LAYER 2: PREMIUM LOADING OVERLAY
           if (_isLoading)
             Container(
-              color: Colors.black,
               width: double.infinity,
               height: double.infinity,
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: const Text(
-                        "X5",
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 60,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 2.0,
-                          fontFamily: 'Arial',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    const SizedBox(
-                      width: 200,
-                      child: LinearProgressIndicator(
-                        backgroundColor: Colors.white10,
-                        color: Colors.white,
-                        minHeight: 2,
-                      ),
-                    ),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color(0xFF0D0D0D),
+                    Color(0xFF1A1A2E),
+                    Color(0xFF16213E),
                   ],
                 ),
+              ),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // Animated glow circles
+                  AnimatedBuilder(
+                    animation: _pulseAnimation,
+                    builder: (context, child) {
+                      return Container(
+                        width: 200 + (_glowAnimation.value * 2),
+                        height: 200 + (_glowAnimation.value * 2),
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: RadialGradient(
+                            colors: [
+                              Colors.orange.withOpacity(_pulseAnimation.value * 0.3),
+                              Colors.deepOrange.withOpacity(_pulseAnimation.value * 0.15),
+                              Colors.transparent,
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Rotating ring
+                  AnimatedBuilder(
+                    animation: _rotateAnimation,
+                    builder: (context, child) {
+                      return Transform.rotate(
+                        angle: _rotateAnimation.value * 2 * 3.14159,
+                        child: Container(
+                          width: 140,
+                          height: 140,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.white.withOpacity(0.1),
+                              width: 1,
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              Positioned(
+                                top: 0,
+                                left: 65,
+                                child: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: Colors.orange.withOpacity(0.8),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.orange.withOpacity(0.5),
+                                        blurRadius: 10,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  // Main logo with scale animation
+                  Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      AnimatedBuilder(
+                        animation: _scaleAnimation,
+                        builder: (context, child) {
+                          return Transform.scale(
+                            scale: _scaleAnimation.value,
+                            child: Container(
+                              width: 100,
+                              height: 100,
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(24),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.orange.withOpacity(0.3),
+                                    blurRadius: 30,
+                                    spreadRadius: 5,
+                                  ),
+                                ],
+                              ),
+                              child: const Center(
+                                child: Text(
+                                  "X5",
+                                  style: TextStyle(
+                                    color: Color(0xFF1A1A2E),
+                                    fontSize: 36,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 40),
+                      // Premium progress bar
+                      SizedBox(
+                        width: 160,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: const LinearProgressIndicator(
+                            backgroundColor: Color(0xFF2A2A4A),
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
+                            minHeight: 3,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      const Text(
+                        "Загрузка...",
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                          letterSpacing: 2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
             ),
 
