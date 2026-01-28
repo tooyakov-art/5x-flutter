@@ -25,8 +25,6 @@ workflows:
       - name: Build iOS
         script: |
           flutter build ipa --release \
-            --build-name=1.0.3 \
-            --build-number=$PROJECT_BUILD_NUMBER \
             --export-options-plist=/Users/builder/export_options.plist
 
     artifacts:
