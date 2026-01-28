@@ -372,6 +372,7 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
               transparentBackground: true,
               useHybridComposition: true, // For better Android performance
               allowsInlineMediaPlayback: true,
+              mediaPlaybackRequiresUserGesture: false,
               // 🚫 DISABLE CACHE - Always load fresh content
               cacheEnabled: false,
               clearCache: true,
@@ -443,6 +444,14 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
                     await _disableScreenProtection();
                   }
                 },
+              );
+            },
+            // 🎤 Handle microphone/camera permission requests from web
+            onPermissionRequest: (controller, request) async {
+              print("🎤 Permission request: ${request.resources}");
+              return PermissionResponse(
+                resources: request.resources,
+                action: PermissionResponseAction.GRANT,
               );
             },
             onLoadStop: (controller, url) async {
