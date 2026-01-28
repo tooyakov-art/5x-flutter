@@ -332,27 +332,30 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
           ? '${appleCredential.givenName} ${appleCredential.familyName ?? ""}'.trim()
           : user?.displayName ?? 'Apple User';
 
+      // Send using JSON for safety with special chars
+      final userData = jsonEncode({
+        'uid': user?.uid ?? '',
+        'email': user?.email ?? '',
+        'displayName': displayName,
+        'photoURL': user?.photoURL ?? '',
+      });
       _webViewController?.evaluateJavascript(source: '''
-        window.onAppAuthSuccess && window.onAppAuthSuccess({
-          uid: "${user?.uid ?? ''}",
-          email: "${user?.email ?? ''}",
-          displayName: "$displayName",
-          photoURL: "${user?.photoURL ?? ''}"
-        });
+        window.onAppAuthSuccess && window.onAppAuthSuccess($userData);
       ''');
+      print("✅ Apple Sign In Success: ${user?.email}");
     } on SignInWithAppleAuthorizationException catch (e) {
-      // Handle specific Apple Sign In errors (user cancelled, etc.)
       print("❌ Apple Sign In Authorization Error: ${e.code} - ${e.message}");
       final errorMsg = e.code == AuthorizationErrorCode.canceled
           ? 'User cancelled'
-          : e.message;
+          : 'Apple: ${e.message}';
       _webViewController?.evaluateJavascript(source: '''
         window.onAppAuthFailed && window.onAppAuthFailed("$errorMsg");
       ''');
     } catch (e) {
       print("❌ Apple Sign In Error: $e");
+      final errorStr = e.toString().replaceAll('"', "'").replaceAll('\n', ' ');
       _webViewController?.evaluateJavascript(source: '''
-        window.onAppAuthFailed && window.onAppAuthFailed("$e");
+        window.onAppAuthFailed && window.onAppAuthFailed("Apple: $errorStr");
       ''');
     }
   }
@@ -365,38 +368,46 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
           ? GoogleSignIn(clientId: '931639129066-drd4qhjo5pgki47itjup0dibft0a7i3f.apps.googleusercontent.com')
           : GoogleSignIn();
 
+      print("🔵 Starting Google Sign In (iOS: ${Platform.isIOS})");
       final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
-      
+
       if (googleUser == null) {
-        // User cancelled
+        print("⚠️ Google Sign In cancelled by user");
         _webViewController?.evaluateJavascript(source: '''
           window.onAppAuthFailed && window.onAppAuthFailed("User cancelled");
         ''');
         return;
       }
 
+      print("🔵 Got Google user: ${googleUser.email}");
       final GoogleSignInAuthentication googleAuth = await googleUser.authentication;
+
+      print("🔵 Creating Firebase credential...");
       final credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
 
+      print("🔵 Signing in to Firebase...");
       final userCredential = await FirebaseAuth.instance.signInWithCredential(credential);
       final user = userCredential.user;
 
-      // Send success back to React
+      // Send using JSON for safety with special chars
+      final userData = jsonEncode({
+        'uid': user?.uid ?? '',
+        'email': user?.email ?? '',
+        'displayName': user?.displayName ?? '',
+        'photoURL': user?.photoURL ?? '',
+      });
       _webViewController?.evaluateJavascript(source: '''
-        window.onAppAuthSuccess && window.onAppAuthSuccess({
-          uid: "${user?.uid ?? ''}",
-          email: "${user?.email ?? ''}",
-          displayName: "${user?.displayName ?? ''}",
-          photoURL: "${user?.photoURL ?? ''}"
-        });
+        window.onAppAuthSuccess && window.onAppAuthSuccess($userData);
       ''');
+      print("✅ Google Sign In Success: ${user?.email}");
     } catch (e) {
       print("❌ Google Sign In Error: $e");
+      final errorStr = e.toString().replaceAll('"', "'").replaceAll('\n', ' ');
       _webViewController?.evaluateJavascript(source: '''
-        window.onAppAuthFailed && window.onAppAuthFailed("$e");
+        window.onAppAuthFailed && window.onAppAuthFailed("Google: $errorStr");
       ''');
     }
   }
