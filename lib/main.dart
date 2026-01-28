@@ -15,32 +15,26 @@ import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 // Screen protection disabled for now, will re-add with platform channels later
 
 void main() async {
-  // Wrap everything in error handling
-  runZonedGuarded(() async {
-    WidgetsFlutterBinding.ensureInitialized();
+  WidgetsFlutterBinding.ensureInitialized();
 
-    // Initialize Firebase with error handling
-    try {
-      await Firebase.initializeApp();
-      print("✅ Firebase initialized successfully");
-    } catch (e) {
-      print("⚠️ Firebase init error (may be normal on web): $e");
-    }
+  // Initialize Firebase BEFORE runApp - CRITICAL for auth
+  try {
+    await Firebase.initializeApp();
+    print("✅ Firebase initialized successfully");
+  } catch (e) {
+    print("⚠️ Firebase init error: $e");
+  }
 
-    // Catch any unhandled Flutter errors
-    FlutterError.onError = (FlutterErrorDetails details) {
-      print("❌ Flutter error: ${details.exception}");
-      FlutterError.presentError(details);
-    };
+  // Catch any unhandled Flutter errors
+  FlutterError.onError = (FlutterErrorDetails details) {
+    print("❌ Flutter error: ${details.exception}");
+    FlutterError.presentError(details);
+  };
 
-    runApp(const MaterialApp(
-      home: X5BridgeApp(),
-      debugShowCheckedModeBanner: false,
-    ));
-  }, (error, stackTrace) {
-    print("❌ Unhandled error: $error");
-    print("Stack trace: $stackTrace");
-  });
+  runApp(const MaterialApp(
+    home: X5BridgeApp(),
+    debugShowCheckedModeBanner: false,
+  ));
 }
 
 class X5BridgeApp extends StatefulWidget {
@@ -55,6 +49,7 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
   StreamSubscription<List<PurchaseDetails>>? _subscription;
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
+  String? _loadError;
   late AnimationController _animationController;
   late Animation<double> _fadeAnimation;
   bool _screenProtectionEnabled = false;
@@ -86,6 +81,19 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
     // 🚀 Defer platform-specific initialization to after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initPlatformState();
+    });
+
+    // ⏰ TIMEOUT: Hide loading after 15 seconds no matter what
+    Future.delayed(const Duration(seconds: 15), () {
+      if (mounted && _isLoading) {
+        print("⚠️ Loading timeout - forcing hide");
+        setState(() {
+          _isLoading = false;
+          if (_loadError == null) {
+            _loadError = "Загрузка занимает слишком долго. Проверьте интернет.";
+          }
+        });
+      }
     });
   }
 
@@ -307,7 +315,12 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
   // 🔵 GOOGLE SIGN IN
   Future<void> _signInWithGoogle() async {
     try {
-      final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
+      // iOS requires explicit clientId from GoogleService-Info.plist
+      final googleSignIn = Platform.isIOS
+          ? GoogleSignIn(clientId: '931639129066-drd4qhjo5pgki47itjup0dibft0a7i3f.apps.googleusercontent.com')
+          : GoogleSignIn();
+
+      final GoogleSignInAccount? googleUser = await googleSignIn.signIn();
       
       if (googleUser == null) {
         // User cancelled
@@ -455,16 +468,27 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
               );
             },
             onLoadStop: (controller, url) async {
+              print("✅ Page loaded: $url");
               // Wait a bit to ensure smooth transition
               await Future.delayed(const Duration(seconds: 1));
               if (mounted) {
                 setState(() {
                   _isLoading = false;
+                  _loadError = null;
+                });
+              }
+            },
+            onReceivedError: (controller, request, error) {
+              print("❌ Received error: ${error.type} - ${error.description}");
+              if (mounted && error.type != WebResourceErrorType.CANCELLED) {
+                setState(() {
+                  _isLoading = false;
+                  _loadError = "Ошибка сети: ${error.description}";
                 });
               }
             },
             onProgressChanged: (controller, progress) {
-               // Optional: Update granular progress if needed
+              print("📊 Loading: $progress%");
             },
           ),
 
@@ -487,7 +511,7 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
                           fontSize: 60,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 2.0,
-                          fontFamily: 'Arial', // Fallback, system font usually looks good
+                          fontFamily: 'Arial',
                         ),
                       ),
                     ),
@@ -499,6 +523,44 @@ class _X5BridgeAppState extends State<X5BridgeApp> with SingleTickerProviderStat
                         color: Colors.white,
                         minHeight: 2,
                       ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // ❌ LAYER 3: ERROR OVERLAY
+          if (_loadError != null && !_isLoading)
+            Container(
+              color: Colors.black,
+              width: double.infinity,
+              height: double.infinity,
+              child: Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.wifi_off, color: Colors.white54, size: 64),
+                    const SizedBox(height: 20),
+                    Text(
+                      _loadError!,
+                      style: const TextStyle(color: Colors.white70, fontSize: 16),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 30),
+                    ElevatedButton(
+                      onPressed: () {
+                        setState(() {
+                          _isLoading = true;
+                          _loadError = null;
+                        });
+                        _webViewController?.reload();
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                      ),
+                      child: const Text("Повторить"),
                     ),
                   ],
                 ),
