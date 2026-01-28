@@ -50,21 +50,21 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
   InAppWebViewController? _webViewController;
   bool _isLoading = true;
   String? _loadError;
+  int _errorCount = 0; // Track errors to avoid false positives
 
-  // 🎨 SPLASH ANIMATIONS
-  late AnimationController _pulseController;
-  late AnimationController _scaleController;
-  late AnimationController _rotateController;
-  late Animation<double> _pulseAnimation;
-  late Animation<double> _scaleAnimation;
-  late Animation<double> _rotateAnimation;
-  late Animation<double> _glowAnimation;
+  // 🎨 SPLASH ANIMATIONS - X then 5
+  late AnimationController _xController;
+  late AnimationController _fiveController;
+  late AnimationController _loadingController;
+  late Animation<double> _xOpacity;
+  late Animation<double> _xScale;
+  late Animation<double> _fiveOpacity;
+  late Animation<double> _fiveSlide;
+  late Animation<double> _loadingAnimation;
 
   bool _screenProtectionEnabled = false;
 
   // 🛡️ SCREEN PROTECTION - DISABLED
-  // flutter_windowmanager_plus was causing iOS crash
-  // TODO: Re-implement with platform channels
   Future<void> _enableScreenProtection() async {
     if (!Platform.isAndroid) return;
     print("🛡️ Screen protection disabled (package removed)");
@@ -79,47 +79,60 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
   void initState() {
     super.initState();
 
-    // 🎨 PREMIUM SPLASH ANIMATIONS
-    // Pulse animation (for glow effect)
-    _pulseController = AnimationController(
+    // 🎨 ELEGANT SPLASH: X appears, then 5 slides in
+
+    // X animation - fade in and scale
+    _xController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
+    _xOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _xController, curve: Curves.easeOut),
+    );
+    _xScale = Tween<double>(begin: 0.5, end: 1.0).animate(
+      CurvedAnimation(parent: _xController, curve: Curves.elasticOut),
+    );
+
+    // 5 animation - fade in and slide from right
+    _fiveController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    _fiveOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(parent: _fiveController, curve: Curves.easeOut),
+    );
+    _fiveSlide = Tween<double>(begin: 30.0, end: 0.0).animate(
+      CurvedAnimation(parent: _fiveController, curve: Curves.easeOutCubic),
+    );
+
+    // Loading bar - slow pulse
+    _loadingController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2000),
     )..repeat(reverse: true);
-    _pulseAnimation = Tween<double>(begin: 0.4, end: 1.0).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
-    );
-    _glowAnimation = Tween<double>(begin: 40.0, end: 80.0).animate(
-      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    _loadingAnimation = Tween<double>(begin: 0.3, end: 1.0).animate(
+      CurvedAnimation(parent: _loadingController, curve: Curves.easeInOut),
     );
 
-    // Scale animation (for logo bounce)
-    _scaleController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1200),
-    )..repeat(reverse: true);
-    _scaleAnimation = Tween<double>(begin: 0.95, end: 1.05).animate(
-      CurvedAnimation(parent: _scaleController, curve: Curves.easeInOut),
-    );
-
-    // Rotate animation (for ring)
-    _rotateController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 4000),
-    )..repeat();
-    _rotateAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(_rotateController);
+    // Start animations sequence
+    _xController.forward();
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) _fiveController.forward();
+    });
 
     // 🚀 Defer platform-specific initialization to after first frame
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initPlatformState();
     });
 
-    // ⏰ TIMEOUT: Hide loading after 15 seconds no matter what
-    Future.delayed(const Duration(seconds: 15), () {
+    // ⏰ TIMEOUT: Hide loading after 20 seconds no matter what
+    Future.delayed(const Duration(seconds: 20), () {
       if (mounted && _isLoading) {
         print("⚠️ Loading timeout - forcing hide");
         setState(() {
           _isLoading = false;
-          if (_loadError == null) {
+          // Only show error if we had multiple consecutive errors
+          if (_errorCount >= 3) {
             _loadError = "Загрузка занимает слишком долго. Проверьте интернет.";
           }
         });
@@ -173,9 +186,9 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
   @override
   void dispose() {
     _subscription?.cancel();
-    _pulseController.dispose();
-    _scaleController.dispose();
-    _rotateController.dispose();
+    _xController.dispose();
+    _fiveController.dispose();
+    _loadingController.dispose();
     super.dispose();
   }
 
@@ -520,11 +533,13 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
             },
             onReceivedError: (controller, request, error) {
               print("❌ Received error: ${error.type} - ${error.description}");
+              // Don't show error immediately - WebView often recovers
+              // Only count errors, show UI error only after timeout with multiple errors
               if (mounted && error.type != WebResourceErrorType.CANCELLED) {
-                setState(() {
-                  _isLoading = false;
-                  _loadError = "Ошибка сети: ${error.description}";
-                });
+                _errorCount++;
+                print("⚠️ Error count: $_errorCount");
+                // Don't set _loadError here - let the page try to load
+                // The timeout will handle showing error if needed
               }
             },
             onProgressChanged: (controller, progress) {
@@ -532,150 +547,99 @@ class _X5BridgeAppState extends State<X5BridgeApp> with TickerProviderStateMixin
             },
           ),
 
-          // 🌀 LAYER 2: PREMIUM LOADING OVERLAY
+          // 🌀 LAYER 2: ELEGANT SPLASH - X then 5
           if (_isLoading)
             Container(
               width: double.infinity,
               height: double.infinity,
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    Color(0xFF0D0D0D),
-                    Color(0xFF1A1A2E),
-                    Color(0xFF16213E),
-                  ],
-                ),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
+              color: const Color(0xFF0A0A0A),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Animated glow circles
-                  AnimatedBuilder(
-                    animation: _pulseAnimation,
-                    builder: (context, child) {
-                      return Container(
-                        width: 200 + (_glowAnimation.value * 2),
-                        height: 200 + (_glowAnimation.value * 2),
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: RadialGradient(
-                            colors: [
-                              Colors.orange.withOpacity(_pulseAnimation.value * 0.3),
-                              Colors.deepOrange.withOpacity(_pulseAnimation.value * 0.15),
-                              Colors.transparent,
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  // Rotating ring
-                  AnimatedBuilder(
-                    animation: _rotateAnimation,
-                    builder: (context, child) {
-                      return Transform.rotate(
-                        angle: _rotateAnimation.value * 2 * 3.14159,
-                        child: Container(
-                          width: 140,
-                          height: 140,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.1),
-                              width: 1,
-                            ),
-                          ),
-                          child: Stack(
-                            children: [
-                              Positioned(
-                                top: 0,
-                                left: 65,
-                                child: Container(
-                                  width: 10,
-                                  height: 10,
-                                  decoration: BoxDecoration(
-                                    shape: BoxShape.circle,
-                                    color: Colors.orange.withOpacity(0.8),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.orange.withOpacity(0.5),
-                                        blurRadius: 10,
-                                        spreadRadius: 2,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  // Main logo with scale animation
-                  Column(
+                  const Spacer(flex: 3),
+                  // X5 Logo with sequential animation
+                  Row(
                     mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
                     children: [
+                      // X appears first
                       AnimatedBuilder(
-                        animation: _scaleAnimation,
+                        animation: _xController,
                         builder: (context, child) {
                           return Transform.scale(
-                            scale: _scaleAnimation.value,
-                            child: Container(
-                              width: 100,
-                              height: 100,
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(24),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: Colors.orange.withOpacity(0.3),
-                                    blurRadius: 30,
-                                    spreadRadius: 5,
-                                  ),
-                                ],
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  "X5",
-                                  style: TextStyle(
-                                    color: Color(0xFF1A1A2E),
-                                    fontSize: 36,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 1,
-                                  ),
+                            scale: _xScale.value,
+                            child: Opacity(
+                              opacity: _xOpacity.value,
+                              child: const Text(
+                                "X",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 72,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -2,
                                 ),
                               ),
                             ),
                           );
                         },
                       ),
-                      const SizedBox(height: 40),
-                      // Premium progress bar
-                      SizedBox(
-                        width: 160,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(4),
-                          child: const LinearProgressIndicator(
-                            backgroundColor: Color(0xFF2A2A4A),
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.orange),
-                            minHeight: 3,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Text(
-                        "Загрузка...",
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w500,
-                          letterSpacing: 2,
-                        ),
+                      // 5 slides in after X
+                      AnimatedBuilder(
+                        animation: _fiveController,
+                        builder: (context, child) {
+                          return Transform.translate(
+                            offset: Offset(_fiveSlide.value, 0),
+                            child: Opacity(
+                              opacity: _fiveOpacity.value,
+                              child: const Text(
+                                "5",
+                                style: TextStyle(
+                                  color: Color(0xFFFF6B35),
+                                  fontSize: 72,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: -2,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     ],
+                  ),
+                  const Spacer(flex: 2),
+                  // Elegant minimal loading bar at bottom
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 80),
+                    child: AnimatedBuilder(
+                      animation: _loadingAnimation,
+                      builder: (context, child) {
+                        return Container(
+                          width: 120,
+                          height: 2,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(1),
+                            color: Colors.white.withOpacity(0.1),
+                          ),
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: Container(
+                              width: 120 * _loadingAnimation.value,
+                              height: 2,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(1),
+                                gradient: const LinearGradient(
+                                  colors: [
+                                    Color(0xFFFF6B35),
+                                    Color(0xFFFF8F5A),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
